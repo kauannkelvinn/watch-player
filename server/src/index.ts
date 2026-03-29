@@ -13,7 +13,7 @@ app.use(cors());
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
-    origin: "*", // Em produção, vamos mudar para a URL do seu front
+    origin: "*", 
     methods: ["GET", "POST"]
   }
 });
@@ -26,13 +26,23 @@ const redis = new Redis({
 io.on('connection', (socket) => {
   console.log('Usuário conectado:', socket.id);
 
-  // Evento para entrar na sala
   socket.on('room:join', async ({ roomId, username }) => {
     socket.join(roomId);
     console.log(`${username} entrou na sala ${roomId}`);
-    
-    // Aqui depois buscaremos o estado da sala no Redis
     socket.to(roomId).emit('room:user_joined', { username, id: socket.id });
+  });
+
+  socket.on('media:play', ({ roomId, time }) => {
+    socket.to(roomId).emit('media:play', { time });
+  });
+
+  socket.on('media:pause', ({ roomId }) => {
+    socket.to(roomId).emit('media:pause');
+  });
+
+  socket.on('media:change', ({ roomId, src }) => {
+    // Repassa a nova fonte para os outros na sala
+    socket.to(roomId).emit('media:change', { src });
   });
 
   socket.on('disconnect', () => {
