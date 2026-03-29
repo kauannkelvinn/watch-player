@@ -20,15 +20,45 @@ const redis = new Redis({
   token: process.env.REDIS_TOKEN!,
 });
 
+// Função auxiliar para buscar e enviar lista de usuários da sala
+async function broadcastUsers(roomId: string) {
+  // Buscamos todos os campos do "hash" de usuários daquela sala
+  const users: any = await redis.hgetall(`room:${roomId}:users`);
+  if (!users) return;
+
+  // Transformamos o objeto do Redis em uma lista [{id, username}]
+  const userList = Object.entries(users).map(([id, username]) => ({
+    id,
+    username
+  }));
+
+  io.to(roomId).emit('room:users', userList);
+}
+
 io.on('connection', (socket) => {
-  console.log('Usuário conectado:', socket.id);
+  // Estendendo o objeto socket para guardar info temporária
+  const s = socket as any;
 
   socket.on('room:join', async ({ roomId, username }) => {
     socket.join(roomId);
+    s.roomId = roomId; // Salva no socket para usar no disconnect
+    s.username = username;
+
+    // 1. Salva o usuário no Redis (expira em 24h para não poluir)
+    await redis.hset(`room:${roomId}:users`, { [socket.id]: username });
     
+    // 2. Avisa no chat que alguém entrou
+    io.to(roomId).emit('chat:message', { 
+      user: 'Watch.Party', 
+      text: `${username} entrou na sala`, 
+      isSystem: true 
+    });
+
+    // 3. Atualiza lista de membros para todos
+    await broadcastUsers(roomId);
+    
+    // --- Lógica de Sync de Vídeo ---
     let roomState: any = await redis.hgetall(`room:${roomId}`);
-    
-    // Se a sala não existe no Redis, vamos criar um estado inicial "vivo"
     if (!roomState || !roomState.src) {
       const initialState = {
         src: 'https://www.youtube.com/watch?v=4W9_H0mdJBo',
@@ -39,7 +69,6 @@ io.on('connection', (socket) => {
       roomState = initialState;
     }
   
-    // Envia para o usuário que acabou de entrar
     socket.emit('room:sync_initial', {
       src: roomState.src,
       time: parseFloat(roomState.time || '0'),
@@ -48,11 +77,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('media:play', async ({ roomId, time }) => {
-    // Salva o tempo atual e o estado de tocando
-    await redis.hset(`room:${roomId}`, { 
-      time: time.toString(), 
-      playing: "true" 
-    });
+    await redis.hset(`room:${roomId}`, { time: time.toString(), playing: "true" });
     socket.to(roomId).emit('media:play', { time });
   });
 
@@ -62,18 +87,31 @@ io.on('connection', (socket) => {
   });
 
   socket.on('media:change', async ({ roomId, src }) => {
-    // Reseta o tempo para 0 quando o vídeo muda
     await redis.hset(`room:${roomId}`, { src, time: 0, playing: false });
     socket.to(roomId).emit('media:change', { src });
   });
 
   socket.on('chat:message', ({ roomId, user, text }) => {
-    // io.to envia para TODO MUNDO na sala (inclusive quem mandou)
     io.to(roomId).emit('chat:message', { user, text });
-    console.log(`Mensagem em ${roomId}: [${user}]: ${text}`);
   });
 
-  socket.on('disconnect', () => {
+  socket.on('disconnect', async () => {
+    const { roomId, username } = s;
+
+    if (roomId) {
+      // 1. Remove o usuário do Redis
+      await redis.hdel(`room:${roomId}:users`, socket.id);
+
+      // 2. Avisa no chat que saiu
+      io.to(roomId).emit('chat:message', { 
+        user: 'Watch.Party', 
+        text: `${username} saiu da sala`, 
+        isSystem: true 
+      });
+
+      // 3. Atualiza a lista para quem sobrou
+      await broadcastUsers(roomId);
+    }
     console.log('Usuário desconectado:', socket.id);
   });
 });
