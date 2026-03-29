@@ -86,12 +86,19 @@ export default function Home() {
   }, []);
 
   const handleJoinRoom = () => {
-    if (!username.trim()) return alert('Digite seu nome!');
+  if (!username.trim()) return alert('Digite seu nome!');
+  
+  // Garante que o socket conecte ANTES de emitir o join
+  socket.connect();
+  
+  // Usamos um timeout minúsculo ou ouvimos o evento 'connect' para garantir
+  socket.once('connect', () => {
+    console.log("Conectado com ID:", socket.id);
+    socket.emit('room:join', { roomId: finalRoomId, username });
     setHasInteracted(true);
     setUrlInput(url);
-    socket.connect();
-    socket.emit('room:join', { roomId: finalRoomId, username });
-  };
+  });
+};
 
 
   useEffect(() => {

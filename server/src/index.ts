@@ -40,8 +40,8 @@ io.on('connection', (socket) => {
   const s = socket as any;
 
   socket.on('room:join', async ({ roomId, username }) => {
-    socket.join(roomId);
-    s.roomId = roomId; // Salva no socket para usar no disconnect
+   console.log(`📡 Usuário ${username} tentando entrar na sala: ${roomId}`); // Adicione esse log
+  socket.join(roomId);
     s.username = username;
 
     // 1. Salva o usuário no Redis (expira em 24h para não poluir)
