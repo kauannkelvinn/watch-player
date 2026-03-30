@@ -40,23 +40,23 @@ io.on('connection', (socket) => {
   const s = socket as any;
 
   socket.on('room:join', async ({ roomId, username }) => {
-   console.log(`📡 Usuário ${username} tentando entrar na sala: ${roomId}`); // Adicione esse log
-  socket.join(roomId);
+    console.log(`📡 Usuário ${username} tentando entrar na sala: ${roomId}`); // Adicione esse log
+    socket.join(roomId);
     s.username = username;
 
     // 1. Salva o usuário no Redis (expira em 24h para não poluir)
     await redis.hset(`room:${roomId}:users`, { [socket.id]: username });
-    
+
     // 2. Avisa no chat que alguém entrou
-    io.to(roomId).emit('chat:message', { 
-      user: 'Watch.Party', 
-      text: `${username} entrou na sala`, 
-      isSystem: true 
+    io.to(roomId).emit('chat:message', {
+      user: 'Watch.Party',
+      text: `${username} entrou na sala`,
+      isSystem: true
     });
 
     // 3. Atualiza lista de membros para todos
     await broadcastUsers(roomId);
-    
+
     // --- Lógica de Sync de Vídeo ---
     let roomState: any = await redis.hgetall(`room:${roomId}`);
     if (!roomState || !roomState.src) {
@@ -68,7 +68,7 @@ io.on('connection', (socket) => {
       await redis.hset(`room:${roomId}`, initialState);
       roomState = initialState;
     }
-  
+
     socket.emit('room:sync_initial', {
       src: roomState.src,
       time: parseFloat(roomState.time || '0'),
@@ -96,21 +96,26 @@ io.on('connection', (socket) => {
   });
 
   socket.on('disconnect', async () => {
-    const { roomId, username } = s;
+    const s = socket as any;
+    const roomId = s.roomId;
+    const username = s.username;
 
     if (roomId) {
       // 1. Remove o usuário do Redis
       await redis.hdel(`room:${roomId}:users`, socket.id);
 
       // 2. Avisa no chat que saiu
-      io.to(roomId).emit('chat:message', { 
-        user: 'Watch.Party', 
-        text: `${username} saiu da sala`, 
-        isSystem: true 
+      io.to(roomId).emit('chat:message', {
+        user: 'Watch.Party',
+        text: `${username} saiu da sala`,
+        isSystem: true
       });
 
-      // 3. Atualiza a lista para quem sobrou
-      await broadcastUsers(roomId);
+      const users: any = await redis.hgetall(`room:${roomId}:users`);
+      if (!users) {
+        const userList = Object.entries(users).map(([id, username]) => ({ id, username }));
+        io.to(roomId).emit('room:users', userList);
+      }
     }
     console.log('Usuário desconectado:', socket.id);
   });
