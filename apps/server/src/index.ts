@@ -4,85 +4,107 @@ import { Server } from 'socket.io';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { Redis } from '@upstash/redis';
+import type {
+  ChatMessage,
+  ClientToServerEvents,
+  RoomState,
+  ServerToClientEvents,
+  User,
+} from '@watchparty/types';
 
 dotenv.config();
+
+interface SocketData {
+  username?: string;
+  roomId?: string;
+}
 
 const app = express();
 app.use(cors());
 
 const httpServer = createServer(app);
-const io = new Server(httpServer, {
-  cors: { origin: "*", methods: ["GET", "POST"] }
-});
+const io = new Server<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>(
+  httpServer,
+  {
+    cors: { origin: '*', methods: ['GET', 'POST'] },
+  },
+);
 
 const redis = new Redis({
   url: process.env.REDIS_URL!,
   token: process.env.REDIS_TOKEN!,
 });
 
-// Função auxiliar para buscar e enviar lista de usuários da sala
-async function broadcastUsers(roomId: string) {
-  // Buscamos todos os campos do "hash" de usuários daquela sala
-  const users: any = await redis.hgetall(`room:${roomId}:users`);
+function parseRoomState(raw: Record<string, string> | null): RoomState | null {
+  if (!raw?.src) return null;
+
+  return {
+    src: raw.src,
+    time: parseFloat(raw.time ?? '0'),
+    playing: raw.playing === 'true',
+  };
+}
+
+function formatMessageTime(): string {
+  const now = new Date();
+  return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+}
+
+async function broadcastUsers(roomId: string): Promise<void> {
+  const users = await redis.hgetall<Record<string, string>>(`room:${roomId}:users`);
   if (!users) return;
 
-  // Transformamos o objeto do Redis em uma lista [{id, username}]
-  const userList = Object.entries(users).map(([id, username]) => ({
+  const userList: User[] = Object.entries(users).map(([id, username]) => ({
     id,
-    username
+    username,
   }));
 
   io.to(roomId).emit('room:users', userList);
 }
 
 io.on('connection', (socket) => {
-  // Estendendo o objeto socket para guardar info temporária
-  const s = socket as any;
-
   socket.on('room:join', async ({ roomId, username }) => {
-    console.log(`📡 Usuário ${username} tentando entrar na sala: ${roomId}`); // Adicione esse log
     socket.join(roomId);
-    s.username = username;
+    socket.data.username = username;
 
-    // 1. Salva o usuário no Redis (expira em 24h para não poluir)
     await redis.hset(`room:${roomId}:users`, { [socket.id]: username });
 
-    // 2. Avisa no chat que alguém entrou
-    io.to(roomId).emit('chat:message', {
+    const joinMessage: ChatMessage = {
+      roomId,
       user: 'Watch.Party',
-      text: `${username} entrou na sala`,
-      isSystem: true
-    });
+      text: `${username} joined the room`,
+      time: formatMessageTime(),
+      isSystem: true,
+    };
+    io.to(roomId).emit('chat:message', joinMessage);
 
-    // 3. Atualiza lista de membros para todos
     await broadcastUsers(roomId);
 
-    // --- Lógica de Sync de Vídeo ---
-    let roomState: any = await redis.hgetall(`room:${roomId}`);
-    if (!roomState || !roomState.src) {
-      const initialState = {
+    let roomState = parseRoomState(await redis.hgetall<Record<string, string>>(`room:${roomId}`));
+    if (!roomState) {
+      const initialState: RoomState = {
         src: 'https://www.youtube.com/watch?v=4W9_H0mdJBo',
         time: 0,
-        playing: false
+        playing: false,
       };
-      await redis.hset(`room:${roomId}`, initialState);
+      await redis.hset(`room:${roomId}`, {
+        src: initialState.src,
+        time: String(initialState.time),
+        playing: String(initialState.playing),
+      });
       roomState = initialState;
     }
 
-    socket.emit('room:sync_initial', {
-      src: roomState.src,
-      time: parseFloat(roomState.time || '0'),
-      playing: roomState.playing === 'true' || roomState.playing === true
-    });
+    socket.emit('room:sync_initial', roomState);
   });
 
   socket.on('media:play', async ({ roomId, time }) => {
-    await redis.hset(`room:${roomId}`, { time: time.toString(), playing: "true" });
+    await redis.hset(`room:${roomId}`, { time: time.toString(), playing: 'true' });
     socket.to(roomId).emit('media:play', { time });
   });
 
   socket.on('media:pause', async ({ roomId }) => {
-    await redis.hset(`room:${roomId}`, { playing: "false" });
+    await redis.hset(`room:${roomId}`, { playing: 'false' });
     socket.to(roomId).emit('media:pause');
   });
 
@@ -92,36 +114,43 @@ io.on('connection', (socket) => {
   });
 
   socket.on('chat:message', ({ roomId, user, text }) => {
-    io.to(roomId).emit('chat:message', { user, text });
+    const message: ChatMessage = {
+      roomId,
+      user,
+      text,
+      time: formatMessageTime(),
+    };
+    io.to(roomId).emit('chat:message', message);
   });
 
   socket.on('disconnect', async () => {
-    const s = socket as any;
-    const roomId = s.roomId;
-    const username = s.username;
+    const { roomId, username } = socket.data;
 
     if (roomId) {
-      // 1. Remove o usuário do Redis
       await redis.hdel(`room:${roomId}:users`, socket.id);
 
-      // 2. Avisa no chat que saiu
-      io.to(roomId).emit('chat:message', {
+      const leaveMessage: ChatMessage = {
+        roomId,
         user: 'Watch.Party',
-        text: `${username} saiu da sala`,
-        isSystem: true
-      });
+        text: `${username} left the room`,
+        time: formatMessageTime(),
+        isSystem: true,
+      };
+      io.to(roomId).emit('chat:message', leaveMessage);
 
-      const users: any = await redis.hgetall(`room:${roomId}:users`);
-      if (!users) {
-        const userList = Object.entries(users).map(([id, username]) => ({ id, username }));
+      const users = await redis.hgetall<Record<string, string>>(`room:${roomId}:users`);
+      if (users) {
+        const userList: User[] = Object.entries(users).map(([id, name]) => ({
+          id,
+          username: name,
+        }));
         io.to(roomId).emit('room:users', userList);
       }
     }
-    console.log('Usuário desconectado:', socket.id);
   });
 });
 
 const PORT = process.env.PORT || 3001;
 httpServer.listen(PORT, () => {
-  console.log(`🚀 Servidor rodando na porta ${PORT}`);
+  console.log(`Server running on port ${PORT}`);
 });
