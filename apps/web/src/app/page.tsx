@@ -1,8 +1,9 @@
 'use client';
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useState, useRef, useCallback, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
+import ReactPlayer from 'react-player';
+import type { ChatMessage, RoomState, User } from '@watchparty/types';
 import { socket } from './lib/socket';
 import dynamic from 'next/dynamic';
 import { Link as LinkIcon, Send, Copy, Monitor, Users, Play, Pause, Hash, Moon, Sun } from 'lucide-react';
@@ -45,34 +46,31 @@ function formatChatTime(): string {
 
 function HomeContent() {
   const searchParams = useSearchParams();
-  
-  // ESTADOS PRINCIPAIS
+
   const [playing, setPlaying] = useState(false);
   const [url, setUrl] = useState('https://www.youtube.com/watch?v=4W9_H0mdJBo');
   const [hasInteracted, setHasInteracted] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [message, setMessage] = useState('');
-  const [chat, setChat] = useState<{ user: string; text: string; time: string }[]>([]);
+  const [chat, setChat] = useState<ChatMessage[]>([]);
   const [username, setUsername] = useState('');
   const [playerKey, setPlayerKey] = useState(1);
   const [toast, setToast] = useState('');
   const [urlInput, setUrlInput] = useState('');
-  const [users, setUsers] = useState<{ id: string; username: string }[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
   const [isLight, setIsLight] = useState(false);
 
-  // LÓGICA DO ROOM ID: Derivamos o valor direto da URL ou do que foi gerado/digitado
   const [roomInput, setRoomInput] = useState('');
   const [generatedId] = useState(() => Math.random().toString(36).substring(2, 8));
-  
+
   const roomIdFromUrl = searchParams.get('room')?.toLowerCase();
-  // O ID que realmente vale para a sala
   const finalRoomId = roomIdFromUrl || (roomInput.trim() || generatedId).toLowerCase();
 
   const isRemoteEvent = useRef(false);
-  const playerRef = useRef<any>(null);
+  const playerRef = useRef<ReactPlayer | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const currentTimeRef = useRef(0);
-  const pendingSyncRef = useRef<{ time: number; playing: boolean } | null>(null);
+  const pendingSyncRef = useRef<Pick<RoomState, 'time' | 'playing'> | null>(null);
 
   const toggleTheme = () => {
     setIsLight(!isLight);
@@ -84,7 +82,7 @@ function HomeContent() {
     setTimeout(() => setToast(''), 3000);
   };
 
-  const handlePlayerReady = useCallback((player: any) => {
+  const handlePlayerReady = useCallback((player: ReactPlayer | null) => {
     playerRef.current = player;
     if (pendingSyncRef.current) {
       setTimeout(() => {
@@ -96,7 +94,7 @@ function HomeContent() {
   }, []);
 
   const handleJoinRoom = () => {
-    if (!username.trim()) return alert('Digite seu nome!');
+    if (!username.trim()) return alert('Enter your name!');
     socket.connect();
     socket.once('connect', () => {
       socket.emit('room:join', { roomId: finalRoomId, username });
@@ -112,13 +110,13 @@ function HomeContent() {
   useEffect(() => {
     if (!hasInteracted) return;
 
-    socket.on('room:sync_initial', ({ src, time, playing }) => {
+    socket.on('room:sync_initial', ({ src, time, playing: isPlaying }) => {
       setUrl((currentUrl) => {
-        if (src !== currentUrl) setPlayerKey(k => k + 1);
+        if (src !== currentUrl) setPlayerKey((key) => key + 1);
         return src;
       });
       setUrlInput(src);
-      pendingSyncRef.current = { time, playing };
+      pendingSyncRef.current = { time, playing: isPlaying };
     });
 
     socket.on('media:play', ({ time }) => {
@@ -135,18 +133,20 @@ function HomeContent() {
     socket.on('media:change', ({ src }) => {
       setUrl(src);
       setUrlInput(src);
-      setPlayerKey(k => k + 1);
+      setPlayerKey((key) => key + 1);
       setPlaying(false);
       setCurrentTime(0);
       currentTimeRef.current = 0;
-      showToast('🎬 Vídeo alterado para todos');
+      showToast('Video changed for everyone');
     });
 
     socket.on('chat:message', (data) => {
       setChat((prev) => [...prev, {
+        roomId: data.roomId,
         user: data.user,
         text: data.text,
-        time: formatChatTime()
+        time: data.time || formatChatTime(),
+        isSystem: data.isSystem,
       }]);
     });
 
@@ -190,14 +190,14 @@ function HomeContent() {
     e.preventDefault();
     if (!urlInput.trim()) return;
     setUrl(urlInput);
-    setPlayerKey(k => k + 1);
+    setPlayerKey((key) => key + 1);
     socket.emit('media:change', { roomId: finalRoomId, src: urlInput });
   };
 
   const handleCopyLink = () => {
     const shareUrl = `${window.location.origin}?room=${finalRoomId}`;
     navigator.clipboard.writeText(shareUrl);
-    showToast('🔗 Link da sala copiado!');
+    showToast('Room link copied!');
   };
 
   if (!hasInteracted) {
@@ -217,22 +217,22 @@ function HomeContent() {
             </div>
             <div className="glass-card" style={{ padding: 30, display: 'flex', flexDirection: 'column', gap: 18 }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-                <label style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.12em', fontFamily: 'var(--font-mono)' }}>Seu nome</label>
-                <input className="input-base" type="text" value={username} onChange={(e) => setUsername(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleJoinRoom()} placeholder="Como quer ser chamado?" />
+                <label style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.12em', fontFamily: 'var(--font-mono)' }}>Your name</label>
+                <input className="input-base" type="text" value={username} onChange={(e) => setUsername(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleJoinRoom()} placeholder="What should we call you?" />
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-                <label style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.12em', fontFamily: 'var(--font-mono)' }}>Código da sala</label>
-                <input 
-                  className="input-base" 
-                  type="text" 
-                  value={roomIdFromUrl || roomInput || generatedId} 
-                  onChange={(e) => setRoomInput(e.target.value)} 
-                  onKeyDown={(e) => e.key === 'Enter' && handleJoinRoom()} 
-                  placeholder="Crie ou use o gerado" 
+                <label style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.12em', fontFamily: 'var(--font-mono)' }}>Room code</label>
+                <input
+                  className="input-base"
+                  type="text"
+                  value={roomIdFromUrl || roomInput || generatedId}
+                  onChange={(e) => setRoomInput(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleJoinRoom()}
+                  placeholder="Create one or use the generated code"
                 />
               </div>
               <div style={{ height: 1, background: 'linear-gradient(90deg, transparent, rgba(100,60,220,0.3), transparent)' }} />
-              <button className="btn-primary" onClick={handleJoinRoom} style={{ width: '100%' }}>Entrar na Sala →</button>
+              <button className="btn-primary" onClick={handleJoinRoom} style={{ width: '100%' }}>Join Room →</button>
             </div>
           </div>
         </div>
@@ -255,13 +255,13 @@ function HomeContent() {
             </div>
             <span className={`pill ${playing ? 'pill-live' : 'pill-paused'}`} style={{ gap: 6 }}>
               {playing ? <Play size={10} fill="currentColor" /> : <Pause size={10} fill="currentColor" />}
-              {playing ? 'ao vivo' : 'pausado'}
+              {playing ? 'live' : 'paused'}
             </span>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <button onClick={toggleTheme} className="btn-icon">
                 {isLight ? <Moon size={16} /> : <Sun size={16} />}
               </button>
-              <div className="pill-room" title={users.map(u => u.username).join(', ')}>
+              <div className="pill-room" title={users.map((user) => user.username).join(', ')}>
                 <Users size={14} style={{ marginRight: 6 }} />
                 <span style={{ fontSize: 11, fontWeight: 700 }}>{users.length}</span>
               </div>
@@ -281,9 +281,9 @@ function HomeContent() {
             <form onSubmit={handleUrlSubmit}>
               <div className="url-bar-inner">
                 <LinkIcon size={13} color="var(--text-muted)" />
-                <input className="url-input" type="text" value={urlInput} onChange={(e) => setUrlInput(e.target.value)} placeholder="Cole o link do YouTube..." style={{ marginLeft: 8 }} />
+                <input className="url-input" type="text" value={urlInput} onChange={(e) => setUrlInput(e.target.value)} placeholder="Paste YouTube link..." style={{ marginLeft: 8 }} />
                 <span className="url-time">{formatTime(currentTime)}</span>
-                <button type="submit" className="url-btn">Trocar →</button>
+                <button type="submit" className="url-btn">Change →</button>
               </div>
             </form>
           </div>
@@ -302,7 +302,7 @@ function HomeContent() {
             {chat.length === 0 ? (
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, opacity: 0.12 }}>
                 <Monitor size={32} />
-                <span style={{ fontSize: 10, letterSpacing: '0.08em', fontFamily: 'var(--font-mono)' }}>aguardando mensagens...</span>
+                <span style={{ fontSize: 10, letterSpacing: '0.08em', fontFamily: 'var(--font-mono)' }}>waiting for messages...</span>
               </div>
             ) : (
               chat.map((msg, i) => {
@@ -327,7 +327,7 @@ function HomeContent() {
           </div>
 
           <form onSubmit={handleSendMessage} className="chat-input-area">
-            <input className="chat-input" type="text" value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Diga algo..." />
+            <input className="chat-input" type="text" value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Say something..." />
             <button type="submit" className="chat-send">
               <Send size={15} />
             </button>
@@ -340,7 +340,7 @@ function HomeContent() {
 
 export default function Home() {
   return (
-    <Suspense fallback={<div style={{ background: '#080808', height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#707070', fontFamily: 'var(--font-mono)', fontSize: '12px' }}>carregando interface...</div>}>
+    <Suspense fallback={<div style={{ background: '#080808', height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#707070', fontFamily: 'var(--font-mono)', fontSize: '12px' }}>loading interface...</div>}>
       <HomeContent />
     </Suspense>
   );
