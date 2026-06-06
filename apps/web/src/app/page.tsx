@@ -6,7 +6,7 @@ import ReactPlayer from 'react-player';
 import type { ChatMessage, RoomState, User } from '@watchparty/types';
 import { socket } from './lib/socket';
 import dynamic from 'next/dynamic';
-import { Link as LinkIcon, Send, Copy, Monitor, Users, Play, Pause, Hash, Moon, Sun } from 'lucide-react';
+import { Link as LinkIcon, Send, Copy, Monitor, Users, Play, Pause, Hash, Moon, Sun, PanelRightClose, PanelRightOpen, Maximize, Minimize } from 'lucide-react';
 
 const Player = dynamic(() => import('./components/Player'), { ssr: false });
 
@@ -59,6 +59,8 @@ function HomeContent() {
   const [urlInput, setUrlInput] = useState('');
   const [users, setUsers] = useState<User[]>([]);
   const [isLight, setIsLight] = useState(false);
+  const [isChatOpen, setIsChatOpen] = useState(true);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   const [roomInput, setRoomInput] = useState('');
   const [generatedId] = useState(() => Math.random().toString(36).substring(2, 8));
@@ -76,6 +78,33 @@ function HomeContent() {
     setIsLight(!isLight);
     document.body.classList.toggle('light');
   };
+
+  const toggleFullscreen = useCallback(() => {
+    const doc = document as Document & { webkitFullscreenElement?: Element; webkitExitFullscreen?: () => Promise<void> };
+    const docEl = document.documentElement as HTMLElement & { webkitRequestFullscreen?: () => Promise<void> };
+
+    if (!document.fullscreenElement && !doc.webkitFullscreenElement) {
+      if (docEl.requestFullscreen) void docEl.requestFullscreen();
+      else void docEl.webkitRequestFullscreen?.();
+    } else {
+      if (document.exitFullscreen) void document.exitFullscreen();
+      else void doc.webkitExitFullscreen?.();
+    }
+  }, []);
+
+  useEffect(() => {
+    const syncFullscreen = () => {
+      const doc = document as Document & { webkitFullscreenElement?: Element };
+      setIsFullscreen(!!(document.fullscreenElement ?? doc.webkitFullscreenElement));
+    };
+
+    document.addEventListener('fullscreenchange', syncFullscreen);
+    document.addEventListener('webkitfullscreenchange', syncFullscreen);
+    return () => {
+      document.removeEventListener('fullscreenchange', syncFullscreen);
+      document.removeEventListener('webkitfullscreenchange', syncFullscreen);
+    };
+  }, []);
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -241,99 +270,124 @@ function HomeContent() {
   }
 
   return (
-    <main style={{ display: 'flex', minHeight: '100vh', background: 'var(--bg)', color: 'var(--text)', overflow: 'hidden' }}>
-      <div className="layout">
-        {toast && <div className="toast">{toast}</div>}
+    <main
+      className="fixed inset-0 flex flex-col landscape:flex-row md:flex-row overflow-hidden bg-background"
+      style={{ color: 'var(--text)' }}
+    >
+      {toast && <div className="toast">{toast}</div>}
 
-        <div className="player-col">
-          <div className="app-header">
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1 }}>
-                <span style={{ fontWeight: 800, fontSize: 12, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--text)' }}>Watch. Party</span>
-                <span style={{ fontSize: 9, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginTop: 2, display: 'flex', alignItems: 'center', gap: 2 }}><Hash size={8} /> {finalRoomId}</span>
-              </div>
-            </div>
-            <span className={`pill ${playing ? 'pill-live' : 'pill-paused'}`} style={{ gap: 6 }}>
-              {playing ? <Play size={10} fill="currentColor" /> : <Pause size={10} fill="currentColor" />}
-              {playing ? 'live' : 'paused'}
-            </span>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <button onClick={toggleTheme} className="btn-icon">
-                {isLight ? <Moon size={16} /> : <Sun size={16} />}
-              </button>
-              <div className="pill-room" title={users.map((user) => user.username).join(', ')}>
-                <Users size={14} style={{ marginRight: 6 }} />
-                <span style={{ fontSize: 11, fontWeight: 700 }}>{users.length}</span>
-              </div>
-              <button className="btn-icon" onClick={handleCopyLink}><Copy size={14} /></button>
+      <div
+        className={`relative flex flex-col bg-black landscape:h-full landscape:flex-1 md:h-full md:flex-1 ${
+          isChatOpen ? 'h-[40dvh] shrink-0' : 'flex-1 min-h-0'
+        }`}
+      >
+        <div className="app-header shrink-0">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1 }}>
+              <span style={{ fontWeight: 800, fontSize: 12, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--text)' }}>Watch. Party</span>
+              <span style={{ fontSize: 9, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginTop: 2, display: 'flex', alignItems: 'center', gap: 2 }}><Hash size={8} /> {finalRoomId}</span>
             </div>
           </div>
-
-          <div className="player-area" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <div className="player-frame" style={{ aspectRatio: '16/9', width: '100%', height: 'auto', maxHeight: '100%' }}>
-              <div style={{ position: 'absolute', inset: 0 }}>
-                <Player key={playerKey} url={url} playing={playing} onPlayerReady={handlePlayerReady} onProgress={handleProgress} progressInterval={500} onPlay={handlePlay} onPause={handlePause} controls={true} width="100%" height="100%" />
-              </div>
+          <span className={`pill ${playing ? 'pill-live' : 'pill-paused'}`} style={{ gap: 6 }}>
+            {playing ? <Play size={10} fill="currentColor" /> : <Pause size={10} fill="currentColor" />}
+            {playing ? 'live' : 'paused'}
+          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button
+              type="button"
+              onClick={() => setIsChatOpen((open) => !open)}
+              className="btn-icon"
+              title={isChatOpen ? 'Hide chat' : 'Show chat'}
+              aria-pressed={isChatOpen}
+            >
+              {isChatOpen ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
+            </button>
+            <button
+              type="button"
+              onClick={toggleFullscreen}
+              className="btn-icon"
+              title={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+              aria-pressed={isFullscreen}
+            >
+              {isFullscreen ? <Minimize size={16} /> : <Maximize size={16} />}
+            </button>
+            <button type="button" onClick={toggleTheme} className="btn-icon">
+              {isLight ? <Moon size={16} /> : <Sun size={16} />}
+            </button>
+            <div className="pill-room" title={users.map((user) => user.username).join(', ')}>
+              <Users size={14} style={{ marginRight: 6 }} />
+              <span style={{ fontSize: 11, fontWeight: 700 }}>{users.length}</span>
             </div>
-          </div>
-
-          <div className="url-bar">
-            <form onSubmit={handleUrlSubmit}>
-              <div className="url-bar-inner">
-                <LinkIcon size={13} color="var(--text-muted)" />
-                <input className="url-input" type="text" value={urlInput} onChange={(e) => setUrlInput(e.target.value)} placeholder="Paste YouTube link..." style={{ marginLeft: 8 }} />
-                <span className="url-time">{formatTime(currentTime)}</span>
-                <button type="submit" className="url-btn">Change →</button>
-              </div>
-            </form>
+            <button className="btn-icon" onClick={handleCopyLink}><Copy size={14} /></button>
           </div>
         </div>
 
-        <aside className="chat-col">
-          <div className="chat-header">
-            <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.12em', fontFamily: 'var(--font-mono)' }}>Chat</span>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span className="glow-dot" style={{ background: '#4ade80' }} />
-              <span style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>online</span>
+        <div className="player-area relative flex-1 min-h-0 w-full flex items-center justify-center">
+          <div className="player-frame w-full h-full max-h-full">
+            <div style={{ position: 'absolute', inset: 0 }}>
+              <Player key={playerKey} url={url} playing={playing} onPlayerReady={handlePlayerReady} onProgress={handleProgress} progressInterval={500} onPlay={handlePlay} onPause={handlePause} controls={true} width="100%" height="100%" />
             </div>
           </div>
+        </div>
 
-          <div className="chat-messages scrollbar-hide">
-            {chat.length === 0 ? (
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, opacity: 0.12 }}>
-                <Monitor size={32} />
-                <span style={{ fontSize: 10, letterSpacing: '0.08em', fontFamily: 'var(--font-mono)' }}>waiting for messages...</span>
-              </div>
-            ) : (
-              chat.map((msg, i) => {
-                const isMe = msg.user === username;
-                const prevUser = i > 0 ? chat[i - 1].user : null;
-                const showMeta = msg.user !== prevUser;
-                return (
-                  <div key={i} className="msg-in" style={{ display: 'flex', flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start', marginTop: showMeta ? 14 : 2 }}>
-                    {showMeta && (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5, flexDirection: isMe ? 'row-reverse' : 'row' }}>
-                        <Avatar name={msg.user} size={18} />
-                        <span style={{ fontSize: 11, fontWeight: 700, color: getUserColor(msg.user) }}>{msg.user}</span>
-                        <span style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{msg.time}</span>
-                      </div>
-                    )}
-                    <div className={isMe ? 'bubble-me' : 'bubble-other'}>{msg.text}</div>
-                  </div>
-                );
-              })
-            )}
-            <div ref={chatEndRef} />
-          </div>
-
-          <form onSubmit={handleSendMessage} className="chat-input-area">
-            <input className="chat-input" type="text" value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Say something..." />
-            <button type="submit" className="chat-send">
-              <Send size={15} />
-            </button>
+        <div className="url-bar shrink-0">
+          <form onSubmit={handleUrlSubmit}>
+            <div className="url-bar-inner">
+              <LinkIcon size={13} color="var(--text-muted)" />
+              <input className="url-input" type="text" value={urlInput} onChange={(e) => setUrlInput(e.target.value)} placeholder="Paste YouTube link..." style={{ marginLeft: 8 }} />
+              <span className="url-time">{formatTime(currentTime)}</span>
+              <button type="submit" className="url-btn">Change →</button>
+            </div>
           </form>
-        </aside>
+        </div>
       </div>
+
+      {isChatOpen && (
+      <aside className="flex flex-col flex-1 min-h-0 bg-background landscape:w-[320px] landscape:flex-none landscape:border-l landscape:border-white/10 md:w-[350px] md:flex-none md:border-l md:border-white/10 transition-all overflow-hidden">
+        <div className="chat-header shrink-0">
+          <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.12em', fontFamily: 'var(--font-mono)' }}>Chat</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span className="glow-dot" style={{ background: '#4ade80' }} />
+            <span style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>online</span>
+          </div>
+        </div>
+
+        <div className="chat-messages scrollbar-hide flex-1 overflow-y-auto">
+          {chat.length === 0 ? (
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, opacity: 0.12 }}>
+              <Monitor size={32} />
+              <span style={{ fontSize: 10, letterSpacing: '0.08em', fontFamily: 'var(--font-mono)' }}>waiting for messages...</span>
+            </div>
+          ) : (
+            chat.map((msg, i) => {
+              const isMe = msg.user === username;
+              const prevUser = i > 0 ? chat[i - 1].user : null;
+              const showMeta = msg.user !== prevUser;
+              return (
+                <div key={i} className="msg-in" style={{ display: 'flex', flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start', marginTop: showMeta ? 14 : 2 }}>
+                  {showMeta && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5, flexDirection: isMe ? 'row-reverse' : 'row' }}>
+                      <Avatar name={msg.user} size={18} />
+                      <span style={{ fontSize: 11, fontWeight: 700, color: getUserColor(msg.user) }}>{msg.user}</span>
+                      <span style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{msg.time}</span>
+                    </div>
+                  )}
+                  <div className={isMe ? 'bubble-me' : 'bubble-other'}>{msg.text}</div>
+                </div>
+              );
+            })
+          )}
+          <div ref={chatEndRef} />
+        </div>
+
+        <form onSubmit={handleSendMessage} className="chat-input-area flex-none pb-safe">
+          <input className="chat-input" type="text" value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Say something..." />
+          <button type="submit" className="chat-send">
+            <Send size={15} />
+          </button>
+        </form>
+      </aside>
+      )}
     </main>
   );
 }

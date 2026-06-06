@@ -1,5 +1,13 @@
 @import "tailwindcss";
 
+@theme {
+  --color-background: var(--bg);
+}
+
+@utility pb-safe {
+  padding-bottom: calc(0.875rem + env(safe-area-inset-bottom, 0px));
+}
+
 /* ─── TOKENS ─────────────────────────────────────────────────── */
 :root {
   --bg:           #080808;
@@ -30,7 +38,6 @@
   --font-display: var(--font-kh-teka), sans-serif;
 }
 
-/* Forçando a fonte KH Teka em TUDO */
 * {
   font-family: var(--font-kh-teka), sans-serif !important;
   box-sizing: border-box;
@@ -38,11 +45,11 @@
   padding: 0;
 }
 
-html, body { 
-  height: 100%; 
-  overflow: hidden; 
-  background-color: var(--bg);
-  color: var(--text);
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 
 body {
@@ -62,16 +69,13 @@ body.light {
   --text:         #1C1C1E;
   --text-sub:     #48484A;
   --text-muted:   #8E8E93;
-  /* O roxo continua o mesmo para manter a identidade */
 }
 
-/* Ajuste para o brilho de fundo no tema claro */
 body.light {
   background-image: 
     radial-gradient(ellipse 45% 35% at 100% 100%, rgba(124, 92, 252, 0.05) 0%, transparent 70%);
 }
 
-/* ─── LAYOUT ─── */
 .layout { 
   display: flex; 
   width: 100%; 
@@ -91,11 +95,9 @@ body.light {
   border-left: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  height: 100vh;
   flex-shrink: 0;
 }
 
-/* ─── PLAYER & HEADER ─── */
 .app-header {
   height: 52px;
   padding: 0 20px;
@@ -114,7 +116,6 @@ body.light {
   position: relative;
 }
 
-/* ─── INPUTS & HOVERS ─── */
 .input-base {
   background: var(--bg-deep);
   border: 1px solid var(--border);
@@ -130,7 +131,6 @@ body.light {
   box-shadow: 0 0 0 3px var(--purple-glow);
 }
 
-/* ─── CHAT ─── */
 .chat-header {
   height: 52px;
   padding: 0 16px;
@@ -199,7 +199,6 @@ body.light {
 }
 .chat-send:hover { transform: translateY(-1px); filter: brightness(1.1); }
 
-/* ─── PILLS & LOGO ─── */
 .pill { display: inline-flex; align-items: center; gap: 5px; border-radius: 999px; padding: 4px 10px; font-size: 10px; font-weight: 700; text-transform: uppercase; }
 .pill-live { background: rgba(34,197,94,0.07); border: 1px solid rgba(34,197,94,0.2); color: #4ade80; }
 .pill-paused { background: var(--bg-deep); border: 1px solid var(--border); color: var(--text-muted); }
@@ -233,10 +232,10 @@ body.light {
   border-left: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  height: 100vh;
   overflow: hidden;
   flex-shrink: 0;
   position: relative;
+  min-height: 0;
 }
 
 /* ─── HEADER ─── */
@@ -516,16 +515,13 @@ body.light .msg-system {
   min-height: 0;          /* Importante para o scroll funcionar no flex */
 }
 
-/* Garante que a coluna do chat tenha altura total */
 .chat-col {
   width: 296px;
   background: var(--surface);
   border-left: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  height: 100vh;          /* Força a altura da tela */
-  min-height: 0;         /* Permite que o flex funcione corretamente */
-  max-height: 100vh;     /* Garante que não ultrapasse a altura da tela */
+  min-height: 0;
   overflow: hidden;
   flex-shrink: 0;
 }
